@@ -1,147 +1,67 @@
-import tkinter as tk
-from tkinter import filedialog
-import os
-import fitz  # Import PyMuPDF
+import streamlit as st
 from PyPDF2 import PdfReader
+import fitz  # PyMuPDF
+import io
+import tempfile
 
-def open_pdf_file():
-    """Opens a file explorer window for PDF selection and analyzes orientation."""
-    root = tk.Tk()
-    root.withdraw()  # Hide the main window
-    filepath = filedialog.askopenfilename(
-        initialdir="/",
-        title="Select PDF File",
-        filetypes=(("PDF files", "*.pdf"), ("all files", "*.*"))
-    )
-    if filepath:
-        analyze_pdf_orientation(filepath)
+st.set_page_config(page_title="📄 PDF Rotator", layout="centered")
+st.title("📄 PDF Orientation Analyzer & Rotator")
 
-def analyze_pdf_orientation(filepath):
-    """Performs structural rotation analysis."""
-    print("-" * 30)
-    print(f"Analyzing PDF: {os.path.basename(filepath)}")
+uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
+
+rotation_target = st.radio("Target Rotation:", ["Rotate to Landscape", "Rotate to Portrait"])
+rotation_value = 1 if rotation_target == "Rotate to Landscape" else 2
+
+if uploaded_file:
     try:
-        current_orientations = analyze_structural_rotation(filepath)
-    except FileNotFoundError:
-        print(f"Error: File '{os.path.basename(filepath)}' not found.")
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    else:
-        rotate_and_save_pdf(filepath, current_orientations)
-
-def analyze_structural_rotation(filepath):
-    """Analyzes PDF page rotation based on the '/Rotate' attribute."""
-    print("\nStructural Page Orientation Analysis:")
-    orientations = []
-    try:
-        with open(filepath, 'rb') as pdf_file:
-            pdf_reader = PdfReader(pdf_file)
-            for page_num in range(len(pdf_reader.pages)):
-                page = pdf_reader.pages[page_num]
-                rotation = page.get('/Rotate', 0)
-                if rotation == 0:
-                    orientation = "Portrait"
-                elif rotation == 90:
-                    orientation = "Landscape (Right)"
-                elif rotation == 180:
-                    orientation = "Portrait (Upside Down)"
-                elif rotation == 270:
-                    orientation = "Landscape (Left)"
-                else:
-                    orientation = f"Unknown (Rotation: {rotation} degrees)"
-                print(f"Page {page_num + 1}: {orientation}")
-                orientations.append(orientation)
-    except Exception as e:
-        print(f"Error during structural analysis: {e}")
+        # Analyze current page orientations using PyPDF2
+        reader = PdfReader(uploaded_file)
         orientations = []
-    return orientations
+        st.subheader("📊 Page Orientations")
+        for i, page in enumerate(reader.pages):
+            rotation = page.get("/Rotate", 0)
+            if rotation == 0:
+                orientation = "Portrait"
+            elif rotation == 90:
+                orientation = "Landscape (Right)"
+            elif rotation == 180:
+                orientation = "Portrait (Upside Down)"
+            elif rotation == 270:
+                orientation = "Landscape (Left)"
+            else:
+                orientation = f"Unknown ({rotation})"
+            orientations.append(orientation)
+            st.write(f"Page {i+1}: {orientation}")
 
-def rotate_and_save_pdf(filepath, current_orientations):
-    filename, ext = os.path.splitext(os.path.basename(filepath))
-    new_filename = f"{filename}_fixed{ext}"
-    new_filepath = os.path.join(os.path.dirname(filepath), new_filename)
+        # Rotate and create new PDF using fitz (PyMuPDF)
+        uploaded_file.seek(0)
+        pdf_doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+        output_pdf = fitz.open()
 
-    try:
-        with fitz.open(filepath) as pdf_doc:
-            rotated_pdf = fitz.open()
-            for page_num, orientation in enumerate(current_orientations):
-                page = pdf_doc[page_num]
+        for page_num, orientation in enumerate(orientations):
+            page = pdf_doc.load_page(page_num)
 
-                # Rotate based on desired orientation
-                if orientation == "Portrait" and rotation_var.get() == 1:
-                    page.set_rotation(270)  # Rotate to landscape
-                elif orientation == "Landscape (Right)" and rotation_var.get() == 2:
-                    page.set_rotation(180)  # Rotate to portrait
-                elif orientation == "Portrait (Upside Down)" and rotation_var.get() == 1:
-                    page.set_rotation(90)  # Rotate to landscape
-                elif orientation == "Landscape (Left)" and rotation_var.get() == 2:
-                    page.set_rotation(0)  # Rotate to portrait
-                else:
-                    print(f"Skipping unknown orientation: {orientation}")
+            if orientation == "Portrait" and rotation_value == 1:
+                page.set_rotation(270)  # to landscape
+            elif orientation == "Landscape (Right)" and rotation_value == 2:
+                page.set_rotation(180)  # to portrait
+            elif orientation == "Portrait (Upside Down)" and rotation_value == 1:
+                page.set_rotation(90)  # to landscape
+            elif orientation == "Landscape (Left)" and rotation_value == 2:
+                page.set_rotation(0)  # to portrait
 
-                rotated_pdf.insert_pdf(pdf_doc, from_page=page_num, to_page=page_num)  # Append page to the rotated PDF
+            output_pdf.insert_pdf(pdf_doc, from_page=page_num, to_page=page_num)
 
-            rotated_pdf.save(new_filepath)  # Save the new PDF
-            print(f"PDF rotation complete! New file saved as: {new_filename}")
+        # Save to in-memory file
+        pdf_bytes = output_pdf.write()
+        st.success("✅ Rotation complete! Download below:")
+
+        st.download_button(
+            label="📥 Download Rotated PDF",
+            data=pdf_bytes,
+            file_name="rotated_output.pdf",
+            mime="application/pdf"
+        )
+
     except Exception as e:
-        print(f"An error occurred during PDF rotation: {e}")
-
-# GUI Setup
-root = tk.Tk()
-root.title("PDF Rotator")
-
-# Get the default filepath
-initial_filepath = filedialog.askopenfilename(
-    initialdir="/",
-    title="Select PDF File",
-    filetypes=(("PDF files", "*.pdf"), ("all files", "*.*"))
-)
-
-filepath_label = tk.Label(root, text="PDF Filepath:")
-filepath_label.pack()
-
-filepath_entry = tk.Entry(root, width=50)
-filepath_entry.insert(0, initial_filepath)
-filepath_entry.pack()
-
-def browse_file():
-    new_filepath = filedialog.askopenfilename(
-        initialdir="/",
-        title="Select PDF File",
-        filetypes=(("PDF files", "*.pdf"), ("all files", "*.*"))
-    )
-    filepath_entry.delete(0, tk.END)  # Clear existing entry
-    filepath_entry.insert(0, new_filepath)
-
-browse_button = tk.Button(root, text="Browse", command=browse_file)
-browse_button.pack()
-
-rotation_var = tk.IntVar()
-rotation_var.set(1)  # Default to landscape
-
-rotation_frame = tk.Frame(root)
-rotation_frame.pack(pady=10)
-
-landscape_radio = tk.Radiobutton(
-    rotation_frame,
-    text="Rotate to Landscape",
-    variable=rotation_var,
-    value=1
-)
-landscape_radio.pack(side=tk.LEFT)
-
-portrait_radio = tk.Radiobutton(
-    rotation_frame,
-    text="Rotate to Portrait",
-    variable=rotation_var,
-    value=2
-)
-portrait_radio.pack(side=tk.LEFT)
-
-rotate_button = tk.Button(root, text="Rotate PDF", command=lambda: analyze_pdf_orientation(filepath_entry.get()))
-rotate_button.pack()
-
-root.mainloop()
-
-if __name__ == "__main__":
-    open_pdf_file()
+        st.error(f"❌ Error: {e}")
